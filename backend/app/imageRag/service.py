@@ -13,7 +13,7 @@ class ImageRagService:
         self.model_name = GEMINI_MODEL
 
     def _optimize_image(self, image_bytes: bytes) -> bytes:
-        """대용량 이미지 전송 시 타임아웃 방지를 위한 리사이징/압축"""
+        """이미지 리사이징 최적화"""
         try:
             img = Image.open(io.BytesIO(image_bytes))
             if img.mode != "RGB":
@@ -26,15 +26,15 @@ class ImageRagService:
             return image_bytes
 
     async def match_image_to_local_food(self, user_image_bytes: bytes, top_k_samples: int = 3) -> ImageMatchResponse:
-        # 1. S3(qwe-s3-pipeline/images/images/)에서 카테고리 목록 조회
+        # 1. S3에서 카테고리 목록 조회 (.DS_Store 등 제외됨)
         categories = s3_storage.get_categories()
         if not categories:
-            raise Exception("S3 버킷에서 음식 카테고리 폴더를 찾을 수 없습니다.")
+            raise Exception("S3 버킷에서 유효한 음식 카테고리 폴더를 찾을 수 없습니다.")
 
-        # 2. 이미지 용량 최적화 (초고속 API 전송)
+        # 2. 이미지 최적화
         optimized_bytes = self._optimize_image(user_image_bytes)
 
-        # 3. Gemini 3.6 멀티모달 분석 질의
+        # 3. Gemini 멀티모달 분석
         prompt = f"""
 당신은 한국 음식 전문가 AI입니다.
 제시된 사용자 음식 사진을 분석하여 아래 [후보 카테고리 목록] 중 가장 일치하는 음식 하나를 정확히 선택하세요.
@@ -56,7 +56,7 @@ class ImageRagService:
 
         text = response.text or ""
 
-        # 파싱 로직
+        # 파싱
         predicted_category = categories[0]
         analysis_text = text
 
@@ -69,7 +69,7 @@ class ImageRagService:
             elif line_str.startswith("분석:"):
                 analysis_text = line_str.replace("분석:", "").strip()
 
-        # 4. S3에서 해당 카테고리의 대표 이미지 URL 리스트 가져오기
+        # 4. S3에서 이미지 URL 리스트 가져오기
         s3_images = s3_storage.list_category_images(category=predicted_category, limit=top_k_samples)
 
         matched_items = [

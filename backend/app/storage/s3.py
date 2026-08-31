@@ -7,29 +7,33 @@ from app.config import (
     AWS_S3_IMAGES_PREFIX,
 )
 
+# 유효한 이미지 확장자 목록
+VALID_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+
 
 class S3StorageManager:
     def __init__(self):
         self.bucket_name = AWS_S3_BUCKET_NAME
         self.region = AWS_REGION
-        self.base_prefix = AWS_S3_IMAGES_PREFIX
+        self.base_prefix = AWS_S3_IMAGES_PREFIX.strip("/")
 
-        # EC2에 연결된 IAM Role(인스턴스 프로파일)을 통해 자동 인증
+        # EC2 IAM Role 자동 인증
         self.s3_client = boto3.client("s3", region_name=self.region)
 
     def _get_key(self, category: str, file_name: Optional[str] = None) -> str:
-        """S3 Key 경로 생성 (예: images/삼계탕/img_01.jpg)"""
+        """S3 Key 경로 생성"""
         category = category.strip("/")
+        prefix = f"{self.base_prefix}/" if self.base_prefix else ""
         if file_name:
-            return f"{self.base_prefix}/{category}/{file_name.strip('/')}"
-        return f"{self.base_prefix}/{category}/"
+            return f"{prefix}{category}/{file_name.strip('/')}"
+        return f"{prefix}{category}/"
 
     # ==========================================
     # 1. READ (조회 / 다운로드)
     # ==========================================
     def get_categories(self) -> List[str]:
-        """S3 images/ 하위 음식 카테고리 폴더 목록 조회"""
-        prefix = f"{self.base_prefix}/"
+        """S3에서 순수 음식 카테고리 폴더만 조회 (.DS_Store 등 숨김 폴더 제외)"""
+        prefix = f"{self.base_prefix}/" if self.base_prefix else ""
         response = self.s3_client.list_objects_v2(
             Bucket=self.bucket_name,
             Prefix=prefix,
@@ -38,22 +42,19 @@ class S3StorageManager:
         categories = []
         for p in response.get("CommonPrefixes", []):
             raw_prefix = p.get("Prefix", "")
-            category_name = raw_prefix[len(prefix):].rstrip("/")
-            if category_name:
+            category_name = raw_prefix[len(prefix):].strip("/")
+            # .DS_Store, __MACOSX, 숨김 폴더 필터링
+            if category_name and not category_name.startswith(".") and category_name != "__MACOSX":
                 categories.append(category_name)
-        return categories
+        return sorted(categories)
 
     def list_category_images(self, category: str, limit: Optional[int] = None) -> List[Dict[str, str]]:
-        """선택 카테고리 폴더 내 이미지 목록 및 S3 URL 반환"""
+        """카테고리 폴더 내의 유효한 이미지 파일 목록 및 S3 URL 반환"""
         prefix = self._get_key(category)
-        kwargs = {
-            "Bucket": self.bucket_name,
-            "Prefix": prefix
-        }
-        if limit:
-            kwargs["MaxKeys"] = limit + 1
-
-        response = self.s3_client.list_objects_v2(**kwargs)
+        response = self.s3_client.list_objects_v2(
+            Bucket=self.bucket_name,
+            Prefix=prefix
+        )
         images = []
 
         for obj in response.get("Contents", []):
@@ -62,6 +63,10 @@ class S3StorageManager:
                 continue
 
             file_name = key.split("/")[-1]
+            # 숨김 파일 제외 및 이미지 확장자 검사
+            if file_name.startswith(".") or not file_name.lower().endswith(VALID_IMAGE_EXTENSIONS):
+                continue
+
             images.append({
                 "category": category,
                 "file_name": file_name,
@@ -75,70 +80,10 @@ class S3StorageManager:
 
         return images
 
-    def get_image_bytes(self, category: str, file_name: str) -> bytes:
-        """S3에서 이미지 Raw Bytes 다운로드"""
-        key = self._get_key(category, file_name)
-        try:
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-            return response["Body"].read()
-        except ClientError as e:
-            raise Exception(f"S3 다운로드 실패 ({key}): {str(e)}")
-
     def get_public_url(self, category: str, file_name: str) -> str:
-        """S3 퍼블릭 이미지 URL 반환"""
+        """S3 퍼블릭 이미지 URL 생성"""
         key = self._get_key(category, file_name)
         return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{key}"
-
-    # ==========================================
-    # 2. CREATE & UPDATE (업로드 / 덮어쓰기)
-    # ==========================================
-    def upload_image(
-        self,
-        category: str,
-        file_name: str,
-        file_bytes: bytes,
-        content_type: str = "image/jpeg"
-    ) -> str:
-        """S3 images/카테고리/ 경로에 이미지 파일 업로드"""
-        key = self._get_key(category, file_name)
-        try:
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=key,
-                Body=file_bytes,
-                ContentType=content_type
-            )
-            return self.get_public_url(category, file_name)
-        except ClientError as e:
-            raise Exception(f"S3 업로드 실패 ({key}): {str(e)}")
-
-    # ==========================================
-    # 3. DELETE (삭제)
-    # ==========================================
-    def delete_image(self, category: str, file_name: str) -> bool:
-        """단일 이미지 파일 삭제"""
-        key = self._get_key(category, file_name)
-        try:
-            self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
-            return True
-        except ClientError as e:
-            raise Exception(f"S3 파일 삭제 실패 ({key}): {str(e)}")
-
-    def delete_category(self, category: str) -> bool:
-        """카테고리 폴더 하위 파일 일괄 삭제"""
-        prefix = self._get_key(category)
-        try:
-            paginator = self.s3_client.get_paginator("list_objects_v2")
-            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
-                if "Contents" in page:
-                    delete_keys = [{"Key": obj["Key"]} for obj in page["Contents"]]
-                    self.s3_client.delete_objects(
-                        Bucket=self.bucket_name,
-                        Delete={"Objects": delete_keys}
-                    )
-            return True
-        except ClientError as e:
-            raise Exception(f"S3 카테고리 삭제 실패 ({category}): {str(e)}")
 
 
 # 싱글톤 인스턴스
