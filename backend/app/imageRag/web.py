@@ -1,34 +1,31 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Query, HTTPException
+from fastapi.responses import Response
+from app.imageRag.service import image_rag_service
+from app.storage.s3 import s3_storage
 from app.imageRag.schema import ImageMatchResponse
-from app.imageRag.service import ImageRagService
 
 router = APIRouter(prefix="/rag", tags=["Image RAG"])
 
 
-def get_rag_service() -> ImageRagService:
-    return ImageRagService()
+@router.post("/match-image", response_model=ImageMatchResponse)
+async def match_image(file: UploadFile = File(...)):
+    user_image_bytes = await file.read()
+    return await image_rag_service.match_image_to_local_food(user_image_bytes)
 
 
-@router.post(
-    "/match-image",
-    response_model=ImageMatchResponse,
-    summary="음식 이미지 업로드 기반 유사 음식 매칭 및 분석"
-)
-async def match_food_image(
-    file: UploadFile = File(..., description="비교할 음식 사진 파일 (jpg, png 등)"),
-    top_k_samples: int = Form(default=3, description="반환할 매칭 폴더 내 대표 이미지 수"),
-    service: ImageRagService = Depends(get_rag_service)
-):
-    # 파일 확장자 검증
-    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/jpg"]
-    if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail="지원하지 않는 이미지 형식입니다. (JPEG, PNG, WEBP만 가능)")
-
+@router.get("/image")
+async def get_food_image(category: str = Query(...), file_name: str = Query(...)):
+    """S3 이미지를 브라우저로 직접 스트리밍 전달 (CORS/서명 에러 방지)"""
     try:
-        image_bytes = await file.read()
-        return await service.match_image_to_local_food(
-            user_image_bytes=image_bytes,
-            top_k_samples=top_k_samples
+        image_bytes = s3_storage.get_image_bytes(category, file_name)
+        # 확장자에 맞춘 MIME 타입 결정
+        ext = file_name.lower().split(".")[-1]
+        media_type = f"image/{ext}" if ext in ["png", "jpeg", "webp", "gif"] else "image/jpeg"
+
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=86400"}
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=404, detail=f"이미지를 찾을 수 없습니다: {str(e)}")
