@@ -41,7 +41,7 @@ pipeline {
                         # 3. Docker Compose 빌드 및 무중단 재배포
                         ssh -o StrictHostKeyChecking=no ${AWS_EC2_USER}@${AWS_EC2_HOST} "
                             cd ${REMOTE_DIR} &&
-                            docker compose down &&
+                            docker compose down -v &&
                             docker compose up --build -d &&
                             docker image prune -f
                         "

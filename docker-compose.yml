@@ -1,31 +1,20 @@
 version: '3.8'
 
 services:
-  # 1. PostgreSQL 데이터베이스
-  postgres:
-    image: postgres:16-alpine
-    container_name: food-rag-postgres
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-app_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
-      POSTGRES_DB: ${POSTGRES_DB:-food_rag_db}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - app-network
 
-  # 2. Redis 캐시 및 세션 저장소
+  # Redis 캐시 및 세션 저장소
   redis:
     image: redis:7-alpine
     container_name: food-rag-redis
     restart: always
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
       - app-network
 
-  # 3. FastAPI 백엔드
+  # 2. FastAPI 백엔드 (AWS RDS 직접 연결)
   backend:
     build:
       context: ./backend
@@ -38,21 +27,20 @@ services:
       - AWS_REGION=${AWS_REGION:-ap-northeast-2}
       - AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-qwe-s3-pipeline}
       - AWS_S3_IMAGES_PREFIX=${AWS_S3_IMAGES_PREFIX:-images/images}
-      - POSTGRES_USER=${POSTGRES_USER:-app_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-app_password}
-      - POSTGRES_DB=${POSTGRES_DB:-food_rag_db}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-postgres}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-inho_secret_key_2026}
     depends_on:
-      - postgres
       - redis
     networks:
       - app-network
 
-  # 4. 프론트엔드 빌더
+  # 3. 프론트엔드 빌더
   frontend-builder:
     build:
       context: ./frontend
@@ -60,11 +48,10 @@ services:
     container_name: food-rag-frontend-builder
     volumes:
       - frontend_dist:/dist
-    command: ["sh", "-c", "cp -r /dist/* /target/ 2>/dev/null || true"]
     networks:
       - app-network
 
-  # 5. Nginx 리버스 프록시
+  # 4. Nginx 리버스 프록시
   nginx:
     image: nginx:alpine
     container_name: food-rag-nginx
@@ -80,7 +67,6 @@ services:
       - app-network
 
 volumes:
-  postgres_data:
   redis_data:
   frontend_dist:
 
