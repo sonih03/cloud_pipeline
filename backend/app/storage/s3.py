@@ -1,3 +1,4 @@
+import urllib.parse
 import boto3
 from typing import Optional, List, Dict
 from app.config import (
@@ -41,7 +42,7 @@ class S3StorageManager:
         return sorted(categories)
 
     def list_category_images(self, category: str, limit: Optional[int] = None) -> List[Dict[str, str]]:
-        """선택 카테고리 폴더 내 이미지 목록 및 백엔드 스트리밍 URL 반환"""
+        """선택 카테고리 폴더 내 이미지 목록 및 안전하게 URL 인코딩된 스트리밍 URL 반환"""
         prefix = self._get_key(category)
         response = self.s3_client.list_objects_v2(
             Bucket=self.bucket_name,
@@ -58,8 +59,10 @@ class S3StorageManager:
             if file_name.startswith(".") or not file_name.lower().endswith(VALID_IMAGE_EXTENSIONS):
                 continue
 
-            # 브라우저가 백엔드 프록시 엔드포인트를 통해 안전하게 이미지를 받도록 설정
-            image_url = f"/rag/image?category={category}&file_name={file_name}"
+            # 한글 카테고리 및 파일명을 안전한 RFC 표준 URL 형태로 인코딩
+            encoded_category = urllib.parse.quote(category)
+            encoded_file_name = urllib.parse.quote(file_name)
+            image_url = f"/rag/image?category={encoded_category}&file_name={encoded_file_name}"
 
             images.append({
                 "category": category,
