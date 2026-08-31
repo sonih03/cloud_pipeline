@@ -7,6 +7,10 @@ class RetrievedImageInfo(BaseModel):
     image_path: str
     file_name: str
 
+class MatchedImageItem(BaseModel):
+    category: str
+    file_name: str
+    image_url: str
 
 class ImageMatchResponse(BaseModel):
     predicted_category: str = Field(..., description="매칭된 가장 유사한 로컬 음식 카테고리")
