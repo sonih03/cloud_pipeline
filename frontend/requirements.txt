@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+google-genai
+pillow
+python-multipart
+boto3
+sqlalchemy
+psycopg2-binary
+redis
+pyjwt
+bcrypt

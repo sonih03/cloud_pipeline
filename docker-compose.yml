@@ -1,45 +1,88 @@
+version: '3.8'
+
 services:
+  # 1. PostgreSQL 데이터베이스
+  postgres:
+    image: postgres:16-alpine
+    container_name: food-rag-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+      POSTGRES_DB: ${POSTGRES_DB:-food_rag_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # 2. Redis 캐시 및 세션 저장소
+  redis:
+    image: redis:7-alpine
+    container_name: food-rag-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+  # 3. FastAPI 백엔드
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: food-rag-backend
     restart: always
-    env_file:
-      - .env
-    volumes:
-      - ./backend/images:/app/images
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.6-flash}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-qwe-s3-pipeline}
+      - AWS_S3_IMAGES_PREFIX=${AWS_S3_IMAGES_PREFIX:-images/images}
+      - POSTGRES_USER=${POSTGRES_USER:-app_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-app_password}
+      - POSTGRES_DB=${POSTGRES_DB:-food_rag_db}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-inho_secret_key_2026}
+    depends_on:
+      - postgres
+      - redis
     networks:
       - app-network
 
+  # 4. 프론트엔드 빌더
   frontend-builder:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: food-rag-frontend-builder
     volumes:
-      - frontend-dist:/target
+      - frontend_dist:/dist
+    command: ["sh", "-c", "cp -r /dist/* /target/ 2>/dev/null || true"]
     networks:
       - app-network
 
+  # 5. Nginx 리버스 프록시
   nginx:
-    build:
-      context: ./nginx
-      dockerfile: Dockerfile
+    image: nginx:alpine
     container_name: food-rag-nginx
     restart: always
     ports:
       - "80:80"
     volumes:
-      - frontend-dist:/usr/share/nginx/html
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend_dist:/usr/share/nginx/html:ro
     depends_on:
       - backend
-      - frontend-builder
     networks:
       - app-network
 
 volumes:
-  frontend-dist:
+  postgres_data:
+  redis_data:
+  frontend_dist:
 
 networks:
   app-network:
