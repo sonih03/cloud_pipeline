@@ -36,6 +36,7 @@ const MatchedImage = styled.img`
   width: 100%;
   height: 140px;
   object-fit: cover;
+  background-color: #0f172a;
 `;
 
 const FileInfo = styled.div`
@@ -47,6 +48,9 @@ const FileInfo = styled.div`
   text-overflow: ellipsis;
 `;
 
+// 외부 접속 없이 즉시 렌더링되는 안전한 대체 이미지 (SVG Data URL)
+const FALLBACK_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='140' viewBox='0 0 180 140'%3E%3Crect width='180' height='140' fill='%231e293b'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-size='12'%3EImage Not Found%3C/text%3E%3C/svg%3E";
+
 export const MatchedGallery = ({ matchedImages = [] }) => {
     if (!matchedImages.length) return null;
 
@@ -54,25 +58,23 @@ export const MatchedGallery = ({ matchedImages = [] }) => {
         <Container>
             <SectionTitle>
                 <Database size={16} />
-                로컬 데이터셋 검색 이미지 ({matchedImages.length}건)
+                S3 매칭 데이터셋 ({matchedImages.length}건)
             </SectionTitle>
             <Grid>
-                {matchedImages.map((item, index) => {
-                    // 백엔드 static 마운트 경로 조합
-                    const imageUrl = `/static/images/${item.category}/${item.file_name}`;
-                    return (
-                        <ImageCard key={index}>
-                            <MatchedImage
-                                src={imageUrl}
-                                alt={`${item.category} ${index + 1}`}
-                                onError={(e) => {
-                                    e.currentTarget.src = 'https://via.placeholder.com/180x140?text=No+Image';
-                                }}
-                            />
-                            <FileInfo title={item.file_name}>{item.file_name}</FileInfo>
-                        </ImageCard>
-                    );
-                })}
+                {matchedImages.map((item, index) => (
+                    <ImageCard key={index}>
+                        <MatchedImage
+                            src={item.image_url}
+                            alt={`${item.category} ${index + 1}`}
+                            onError={(e) => {
+                                // 무한 루프 방지: 한 번 에러 나면 더 이상 onError 실행 안 함
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src = FALLBACK_IMAGE;
+                            }}
+                        />
+                        <FileInfo title={item.file_name}>{item.file_name}</FileInfo>
+                    </ImageCard>
+                ))}
             </Grid>
         </Container>
     );

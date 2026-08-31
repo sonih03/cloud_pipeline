@@ -1,3 +1,4 @@
+import urllib.parse
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException
 from fastapi.responses import Response
 from app.imageRag.service import image_rag_service
@@ -15,17 +16,24 @@ async def match_image(file: UploadFile = File(...)):
 
 @router.get("/image")
 async def get_food_image(category: str = Query(...), file_name: str = Query(...)):
-    """S3 이미지를 브라우저로 직접 스트리밍 전달 (CORS/서명 에러 방지)"""
+    """S3 원본 이미지를 브라우저로 직접 스트리밍 전달"""
     try:
-        image_bytes = s3_storage.get_image_bytes(category, file_name)
-        # 확장자에 맞춘 MIME 타입 결정
-        ext = file_name.lower().split(".")[-1]
+        # 한글 카테고리/파일명 URL 디코딩 안전 보장
+        decoded_category = urllib.parse.unquote(category)
+        decoded_file_name = urllib.parse.unquote(file_name)
+
+        image_bytes = s3_storage.get_image_bytes(decoded_category, decoded_file_name)
+
+        ext = decoded_file_name.lower().split(".")[-1]
         media_type = f"image/{ext}" if ext in ["png", "jpeg", "webp", "gif"] else "image/jpeg"
 
         return Response(
             content=image_bytes,
             media_type=media_type,
-            headers={"Cache-Control": "public, max-age=86400"}
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Content-Type": media_type
+            }
         )
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"이미지를 찾을 수 없습니다: {str(e)}")
+        raise HTTPException(status_code=404, detail=f"S3 이미지 로드 실패: {str(e)}")
