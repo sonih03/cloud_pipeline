@@ -8,7 +8,7 @@ pipeline {
 
         // AWS 배포 타겟 서버 정보
         AWS_EC2_USER = 'ubuntu'
-        AWS_EC2_HOST = 'YOUR_AWS_EC2_PUBLIC_IP'
+        AWS_EC2_HOST = '3.38.41.74'
         REMOTE_DIR   = '/home/ubuntu/project'
     }
 
