@@ -1,103 +1,73 @@
-import io
-from pathlib import Path
-from typing import List, Tuple
-from PIL import Image
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
-
-from app.config import GEMINI_API_KEY, GEMINI_MODEL, IMAGES_DIR, BASE_DIR
-from app.imageRag.schema import RetrievedImageInfo, ImageMatchResponse
-
-
-# Gemini 구조화된 출력(Structured Output)용 스키마
-class CategoryMatchResult(BaseModel):
-    best_category: str
-    analysis: str
+from app.config import GEMINI_API_KEY, GEMINI_MODEL
+from app.storage.s3 import s3_storage
+from app.imageRag.schema import ImageMatchResponse, MatchedImageItem
 
 
 class ImageRagService:
     def __init__(self):
-        if not GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY를 찾을 수 없습니다. 루트 .env 파일을 확인해 주세요.")
-
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.model_name = GEMINI_MODEL
-        self.images_root = IMAGES_DIR
-
-    def _get_available_categories(self) -> List[str]:
-        """로컬 images 폴더 내 존재하는 음식 디렉토리 목록 조회"""
-        if not self.images_root.exists():
-            return []
-        return [d.name for d in self.images_root.iterdir() if d.is_dir()]
-
-    def _get_category_sample_images(self, category: str, limit: int = 3) -> List[Path]:
-        """매칭된 카테고리 폴더에서 대표 이미지 추출"""
-        cat_dir = self.images_root / category
-        if not cat_dir.exists():
-            return []
-
-        valid_extensions = ("*.jpg", "*.jpeg", "*.png", "*.webp")
-        found_files = []
-        for ext in valid_extensions:
-            found_files.extend(list(cat_dir.glob(ext)))
-            if len(found_files) >= limit:
-                break
-        return found_files[:limit]
 
     async def match_image_to_local_food(self, user_image_bytes: bytes, top_k_samples: int = 3) -> ImageMatchResponse:
-        categories = self._get_available_categories()
+        # 1. S3에서 음식 카테고리 목록 가져오기
+        categories = s3_storage.get_categories()
         if not categories:
-            raise ValueError("로컬 images 디렉토리에서 음식 카테고리 폴더를 찾을 수 없습니다.")
+            raise Exception("S3 버킷에서 음식 카테고리 폴더를 찾을 수 없습니다.")
 
-        # 1. 업로드된 바이트를 PIL Image로 변환
-        user_image = Image.open(io.BytesIO(user_image_bytes)).convert("RGB")
-
-        # 2. Gemini 멀티모달 분석: 업로드된 사진과 가장 일치하는 카테고리 선정
+        # 2. Gemini 멀티모달 분석
         prompt = f"""
-당신은 한식 및 요리 이미지 분석 전문가입니다.
-사용자가 업로드한 이미지를 정밀 분석하고, 아래 [보유 음식 카테고리 목록] 중 가장 시각적/재료적으로 일치하거나 유사한 음식을 정확히 1개 선정하세요.
+당신은 한국 음식 전문가 AI입니다.
+제시된 사용자 음식 사진을 분석하여 아래 [후보 카테고리 목록] 중 가장 일치하는 음식 하나를 정확히 선택하세요.
 
-[보유 음식 카테고리 목록]:
+[후보 카테고리 목록]
 {', '.join(categories)}
 
-- best_category: 위 목록에 존재하는 정확한 카테고리 이름 (목록에 없는 단어 사용 금지)
-- analysis: 업로드된 음식의 색감, 주재료, 조리 형태, 플레이팅 등을 근거로 왜 해당 음식과 가장 유사한지 전문가 관점에서 상세하고 친절하게 설명
+출력 형식(반드시 이 형식을 엄격히 준수하세요):
+카테고리: [선택한 카테고리 이름]
+분석: [선택한 이유와 시각적 특징 2-3줄 서술]
 """
-
         response = self.client.models.generate_content(
             model=self.model_name,
-            contents=[prompt, user_image],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=CategoryMatchResult,
-                temperature=0.2
-            )
+            contents=[
+                types.Part.from_bytes(data=user_image_bytes, mime_type="image/jpeg"),
+                prompt
+            ]
         )
 
-        result_data: CategoryMatchResult = response.parsed
-        matched_cat = result_data.best_category.strip()
+        text = response.text or ""
 
-        # 3. 매칭된 카테고리 폴더에서 로컬 이미지 파일 검색 (Retrieval)
-        sample_paths = self._get_category_sample_images(matched_cat, limit=top_k_samples)
+        # 파싱 로직
+        predicted_category = categories[0]
+        analysis_text = text
 
-        matched_image_infos: List[RetrievedImageInfo] = []
-        for img_path in sample_paths:
-            try:
-                rel_path = str(img_path.relative_to(BASE_DIR)).replace("\\", "/")
-            except ValueError:
-                rel_path = str(img_path)
+        for line in text.splitlines():
+            line_str = line.strip()
+            if line_str.startswith("카테고리:"):
+                cand = line_str.replace("카테고리:", "").strip()
+                if cand in categories:
+                    predicted_category = cand
+            elif line_str.startswith("분석:"):
+                analysis_text = line_str.replace("분석:", "").strip()
 
-            matched_image_infos.append(
-                RetrievedImageInfo(
-                    category=matched_cat,
-                    image_path=rel_path,
-                    file_name=img_path.name
-                )
+        # 3. S3에서 일치하는 음식의 이미지 URL 가져오기
+        s3_images = s3_storage.list_category_images(category=predicted_category, limit=top_k_samples)
+
+        matched_items = [
+            MatchedImageItem(
+                category=img["category"],
+                file_name=img["file_name"],
+                image_url=img["image_url"]
             )
+            for img in s3_images
+        ]
 
         return ImageMatchResponse(
-            predicted_category=matched_cat,
-            similarity_analysis=result_data.analysis,
-            matched_images=matched_image_infos
+            predicted_category=predicted_category,
+            similarity_analysis=analysis_text,
+            matched_images=matched_items
         )
+
+
+image_rag_service = ImageRagService()
