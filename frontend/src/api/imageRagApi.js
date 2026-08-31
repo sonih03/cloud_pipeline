@@ -1,15 +1,15 @@
-import { apiClient } from './client';
+import client from './client';
 
-export const matchFoodImage = async ({ file, topKSamples = 3 }) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('top_k_samples', topKSamples);
+export const imageRagApi = {
+    matchImage: async (imageFile) => {
+        const formData = new FormData();
+        formData.append('file', imageFile);
 
-    const response = await apiClient.post('/rag/match-image', formData, {
-        headers: {
-            'Content-Type': 'multipart/form-data',
-        },
-    });
-
-    return response.data;
+        const response = await client.post('/rag/match-image', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        return response.data;
+    },
 };
