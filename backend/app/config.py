@@ -30,5 +30,5 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
 # AWS S3 설정 (.env 미설정 시 기본값 자동 적용)
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
-AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME", "qwe-s3-resource")
+AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME", "qwe-s3-pipeline")
 AWS_S3_IMAGES_PREFIX = os.getenv("AWS_S3_IMAGES_PREFIX", "images").strip("/")
