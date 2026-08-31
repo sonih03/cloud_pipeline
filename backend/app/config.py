@@ -15,7 +15,7 @@ elif (BACKEND_DIR / ".env").exists():
 else:
     load_dotenv()
 
-# 이미지 디렉토리 자동 감지 (backend/images 또는 backend/images/images)
+# 로컬 이미지 디렉토리 감지 (로컬 참조/임시 저장용)
 _raw_images_dir = BACKEND_DIR / "images"
 if (_raw_images_dir / "images").exists():
     IMAGES_DIR = _raw_images_dir / "images"
@@ -26,4 +26,9 @@ BASE_DIR = BACKEND_DIR
 
 # Gemini API 설정
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-3.6-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
+# AWS S3 설정 (.env 미설정 시 기본값 자동 적용)
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME", "qwe-s3-resource")
+AWS_S3_IMAGES_PREFIX = os.getenv("AWS_S3_IMAGES_PREFIX", "images").strip("/")
