@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: food-rag-backend
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./backend/images:/app/images
+    networks:
+      - app-network
+
+  frontend-builder:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: food-rag-frontend-builder
+    volumes:
+      - frontend-dist:/target
+    networks:
+      - app-network
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: food-rag-nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - frontend-dist:/usr/share/nginx/html
+    depends_on:
+      - backend
+      - frontend-builder
+    networks:
+      - app-network
+
+volumes:
+  frontend-dist:
+
+networks:
+  app-network:
+    driver: bridge

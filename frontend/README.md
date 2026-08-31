@@ -1,0 +1,1 @@
+npm install @tanstack/react-query styled-components axios lucide-react
